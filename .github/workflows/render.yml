@@ -2,20 +2,13 @@ name: Render Remotion Video
 
 on:
   workflow_dispatch:
-    inputs:
-      composition:
-        description: 'Composition ID to render'
-        required: false
-        default: 'MyComposition'
-      quality:
-        description: 'Render quality (draft or final)'
-        required: false
-        default: 'draft'
+  push:
+    branches: [ main ]
 
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,6 +17,44 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: Generate Cinematic Audio
+        run: |
+          set -e
+          mkdir -p public
+          cd public
+          
+          # Base cinematic drone (185 seconds)
+          ffmpeg -y -f lavfi -i "sine=f=55:d=185" -af "volume=0.1,afade=t=in:d=2,afade=t=out:st=183:d=2" _base.wav
+          
+          # Tech Click sound
+          ffmpeg -y -f lavfi -i "sine=f=1200:d=0.05" -af "volume=0.2" _click.wav
+          
+          # Whoosh transition sound
+          ffmpeg -y -f lavfi -i "anoisesrc=d=1.5:c=pink:a=0.5" -af "lowpass=f=800,volume=0.15,afade=t=in:d=0.2,afade=t=out:st=0.8:d=0.7" _whoosh.wav
+
+          # Success Chime (for render completion)
+          ffmpeg -y -f lavfi -i "sine=f=880:d=0.5" -af "volume=0.3,afade=t=out:st=0.2:d=0.3" _success.wav
+
+          # Mix base with effects
+          ffmpeg -y \
+            -i _base.wav \
+            -itsoffset 2.6 -i _click.wav \
+            -itsoffset 14.8 -i _whoosh.wav \
+            -itsoffset 34.8 -i _whoosh.wav \
+            -itsoffset 59.8 -i _whoosh.wav \
+            -itsoffset 94.8 -i _whoosh.wav \
+            -itsoffset 139.8 -i _whoosh.wav \
+            -itsoffset 136.0 -i _success.wav \
+            -filter_complex "amix=inputs=8:duration=first:normalize=0[aout]" \
+            -map "[aout]" -t 185 audio.wav
+
+          rm -f _*.wav
 
       - name: Install dependencies
         run: npm install
@@ -36,5 +67,3 @@ jobs:
         with:
           name: video
           path: out/video.mp4
-          if-no-files-found: error
-          retention-days: 7
